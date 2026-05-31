@@ -25,10 +25,10 @@
 | Digital 9 (SDA) | MPU6050 SDA     |
 | 3.3V            | MPU6050 VCC     |
 | GND             | MPU6050 GND     |
-| Digital 6       | LED（正極）      |
 | Digital 12      | 按鈕（一端接 GND）|
 
 > **注意**：Arduino Due 是 3.3V 系統，MPU6050 接 3.3V，不要接 5V。
+> LED 已從程式碼中移除，以 Serial Monitor 文字提示代替視覺回饋。
 
 ---
 
@@ -63,18 +63,18 @@
 
 **你會看到的輸出範例**：
 ```
-# GET_READY
-# START
+# GET_READY         ← 按鈕觸發，等 1 秒
+# START             ← 現在開始做手勢！
 sample_id,timestep,t_us,ax,ay,az,gx,gy,gz
 0,0,12345,1024,-512,16384,10,-8,3
-...
+...（共 150 行資料）...
 # [PERF] --- Sampling Period Statistics ---
 # [PERF] Mean period:   10001.2 us
 # [PERF] Std  period:   87.3 us
 # [PERF] Max deviation: 312.0 us
 # INFERENCE_RESULT: circle
 [RESULT] trial=0 first=12345 last=1512345 pred=1532567
-# END
+# END               ← 完成，可以再按按鈕
 ```
 
 > 最重要的是 `[RESULT]` 那行，analyze_log.py 會自動解析它。

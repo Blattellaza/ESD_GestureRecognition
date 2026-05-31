@@ -35,7 +35,6 @@ static const uint8_t MPU_ADDR = 0x68;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-#define LED_PIN       6
 #define BTN_PIN       12
 
 #define DEBOUNCE_MS   30
@@ -321,10 +320,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
-  pinMode(LED_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT_PULLUP);
   MPU6050_wakeup();
-  analogWrite(LED_PIN, 0);
 
   Serial.println("Dataset collector ready.");
   Serial.println("Push btn to start recording.");
@@ -386,7 +383,6 @@ void recordOneSample() {
   int static_frame_count = 0;  // 本次錄製靜止幀計數（區域變數，不佔全域 SRAM）
 
   Serial.println("# GET_READY");
-  digitalWrite(LED_PIN, HIGH);
   delay(1000);
 
   Serial.println("# START");
@@ -421,7 +417,6 @@ void recordOneSample() {
     if (!ok) {
       Serial.print("# ERROR at timestep ");
       Serial.println(i);
-      digitalWrite(LED_PIN, LOW);
       isRecording = false;
       return;
     }
@@ -467,7 +462,6 @@ void recordOneSample() {
 
   // [SRAM3] # END 移至 runInference() 之後
   Serial.println("# END");
-  digitalWrite(LED_PIN, LOW);
   sampleId++;
   isRecording = false;
 }

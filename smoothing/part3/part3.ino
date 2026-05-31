@@ -34,7 +34,6 @@ static const uint8_t MPU_ADDR = 0x68;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-#define LED_PIN       6
 #define BTN_PIN       12
 
 #define DEBOUNCE_MS   30
@@ -241,10 +240,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
-  pinMode(LED_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT_PULLUP);
   MPU6050_wakeup();
-  analogWrite(LED_PIN, 0);
 
   Serial.print("Smoothing version ready. WINDOW_SIZE=");
   Serial.println(WINDOW_SIZE);
@@ -308,7 +305,6 @@ void recordOneSample() {
   Serial.println("# GET_READY");
   Serial.print("# WINDOW_SIZE=");
   Serial.println(WINDOW_SIZE);
-  digitalWrite(LED_PIN, HIGH);
   delay(1000);
 
   Serial.println("# START");
@@ -346,7 +342,6 @@ void recordOneSample() {
     if (!ok) {
       Serial.print("# ERROR at timestep ");
       Serial.println(i);
-      digitalWrite(LED_PIN, LOW);
       isRecording = false;
       return;
     }
@@ -430,7 +425,6 @@ void recordOneSample() {
   runInference(static_frame_count, t_first_sample_us, t_last_sample_us);
 
   Serial.println("# END");
-  digitalWrite(LED_PIN, LOW);
   sampleId++;
   isRecording = false;
 }

@@ -76,7 +76,6 @@ static const uint8_t MPU_ADDR = 0x68;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-#define LED_PIN       6
 #define BTN_PIN       12
 
 #define DEBOUNCE_MS   30
@@ -425,7 +424,6 @@ void TaskSampling(void *pvParameters) {
     pMsg->sample_id          = sampleId;
 
     Serial.println("# GET_READY");
-    digitalWrite(LED_PIN, HIGH);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     Serial.println("# START");
@@ -464,7 +462,6 @@ void TaskSampling(void *pvParameters) {
       if (!ok) {
         Serial.print("# ERROR at timestep ");
         Serial.println(i);
-        digitalWrite(LED_PIN, LOW);
         record_ok = false;
         break;
       }
@@ -810,16 +807,6 @@ void TaskOutput(void *pvParameters) {
     // ========================================================
 
     Serial.println("# END");
-    digitalWrite(LED_PIN, LOW);
-
-    // [LED] 閃爍次數 = class index + 1（static 不閃）
-    int blinks = (msg.result_idx == -1) ? 0 : (msg.result_idx + 1);
-    for (int b = 0; b < blinks; b++) {
-      digitalWrite(LED_PIN, HIGH);
-      vTaskDelay(pdMS_TO_TICKS(150));
-      digitalWrite(LED_PIN, LOW);
-      vTaskDelay(pdMS_TO_TICKS(150));
-    }
   }
 }
 
@@ -833,8 +820,6 @@ void setup() {
   Serial.println("Dataset collector ready.");
   Serial.println("Push btn to start recording.");
 
-  pinMode(LED_PIN, OUTPUT);
-  analogWrite(LED_PIN, 0);
   pinMode(BTN_PIN, INPUT_PULLUP);
 
   MPU6050_wakeup();
