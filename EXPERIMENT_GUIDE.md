@@ -55,9 +55,9 @@
 ### 2.2 RTOS 版本實驗步驟
 
 1. 手持感測器（MPU6050），保持自然姿勢
-2. 按下按鈕，LED 亮起後等 1 秒
-3. LED 亮著時做一個手勢（circle / left_right / updown）
-4. 等待 LED 熄滅後，Serial Monitor 會出現結果
+2. 按下按鈕，等待 Serial Monitor 出現 `# GET_READY`（1 秒準備時間）
+3. 看到 `# START` 後立刻做一個手勢（circle / left_right / updown）
+4. 看到 `# END` 後代表本次完成，可以再按按鈕做下一次
 5. **重複 10 次**（每個手勢各做幾次）
 6. 全部選取 Serial Monitor 的內容，複製貼上到 `rtos_log.txt`
 
@@ -262,7 +262,7 @@ python analyze_log.py rtos_log.txt prefilter_log.txt window1_log.txt window3_log
 |------|--------|---------|
 | TaskSampling | 3（最高）| 等待按鈕 → 以 100Hz 取樣 150 筆 → 送到推論 queue |
 | TaskInference | 2（中）| 收到樣本 → 跑 CNN → 送結果到輸出 queue |
-| TaskOutput | 1（最低）| 收到結果 → Serial 印出 + LED 控制 |
+| TaskOutput | 1（最低）| 收到結果 → Serial 印出結果 |
 
 優先權最高的 TaskSampling 確保取樣不被推論搶佔，避免丟幀。
 
