@@ -162,6 +162,8 @@ typedef struct {
   int           static_frame_count;                    // 本次錄製靜止幀數
   uint32_t      sample_id;                             // 樣本編號（供 log 用）
   unsigned long t_record_start_us;                     // [PERF] 錄製開始時間（micros）
+  // === 新增：latency timing ===
+  unsigned long t_last_sample_us;                      // [PERF] 最後一筆取樣完成後的時間戳（micros）
 } InferenceMsg_t;
 
 // [RTOS] Inference → Output
@@ -171,6 +173,8 @@ typedef struct {
   float         static_ratio;          // 靜止幀比例（供 log 用）
   uint32_t      sample_id;             // 樣本編號（供 log 用）
   unsigned long t_record_start_us;     // [PERF] 從 Sampling 帶過來（micros）
+  // === 新增：latency timing ===
+  unsigned long t_last_sample_us;      // [PERF] 最後一筆取樣完成後的時間戳（micros）
   unsigned long t_inference_done_us;   // [PERF] Inference 完成時間（micros）
 } OutputMsg_t;
 
@@ -495,6 +499,9 @@ void TaskSampling(void *pvParameters) {
       continue;
     }
 
+    // === 新增：latency timing — 最後一筆取樣完成後立即記錄 ===
+    pMsg->t_last_sample_us = micros();
+
     Serial.println(micros());
 
     // -------------------------------------------------------
@@ -590,9 +597,12 @@ void TaskInference(void *pvParameters) {
     outMsg.sample_id         = pMsg->sample_id;
     outMsg.static_ratio      = static_ratio;
     outMsg.t_record_start_us = pMsg->t_record_start_us;  // [PERF] 帶過來
+    // === 新增：latency timing ===
+    outMsg.t_last_sample_us  = pMsg->t_last_sample_us;   // [PERF] 帶過來
 
     if (static_ratio >= STATIC_RATIO_THRESH) {
       outMsg.result_idx          = -1;
+      // === 新增：latency timing — static 分支也記錄推論完成時間 ===
       outMsg.t_inference_done_us = micros();  // [PERF]
       RTOS_FREE(pMsg);
       xQueueSend(xQueueOutput, &outMsg, portMAX_DELAY);
@@ -781,6 +791,23 @@ void TaskOutput(void *pvParameters) {
     Serial.print("# [PERF] Pipeline overhead:       ");
     Serial.print(pipeline_overhead);
     Serial.println(" us  (end_to_end - 1500000 us recording)");
+
+    // === 新增：latency timing — [RESULT] 機器可解析格式 ===
+    // 格式：[RESULT] trial=N first=T1 last=T2 pred=T3
+    //   trial : 本次錄製序號（sampleId）
+    //   first : 第一筆取樣前的時間戳（TaskSampling 開始錄製）
+    //   last  : 最後一筆取樣完成後的時間戳
+    //   pred  : TaskInference 推論完成後的時間戳
+    // analyze_log.py 會解析此行計算 end-to-end latency
+    Serial.print("[RESULT] trial=");
+    Serial.print(msg.sample_id);
+    Serial.print(" first=");
+    Serial.print(msg.t_record_start_us);
+    Serial.print(" last=");
+    Serial.print(msg.t_last_sample_us);
+    Serial.print(" pred=");
+    Serial.println(msg.t_inference_done_us);
+    // ========================================================
 
     Serial.println("# END");
     digitalWrite(LED_PIN, LOW);
