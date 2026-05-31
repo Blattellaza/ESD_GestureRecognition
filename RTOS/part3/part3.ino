@@ -56,10 +56,10 @@
 #include "I2C_GPIO.h"
 #include "nn_ops.h"
 #include <Arduino.h>
-#include <FreeRTOS.h>
-#include <task.h>
-#include <queue.h>
-#include <semphr.h>
+#include "src/FreeRTOS.h"
+#include "src/task.h"
+#include "src/queue.h"
+#include "src/semphr.h"
 #include <stdlib.h>   // malloc / free
 #include <string.h>   // memcpy
 
