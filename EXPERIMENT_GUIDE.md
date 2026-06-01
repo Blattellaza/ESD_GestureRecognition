@@ -190,12 +190,13 @@ python --version
 
 ### 5.2 執行方法
 
-1. 打開「命令提示字元」或「PowerShell」
-2. 切換到 repo 目錄：
-   ```
-   cd C:\repos\ESD_GestureRecognition
-   ```
-3. 執行分析：
+1. 在 repo 根目錄開啟終端機
+   - Windows Explorer：對 repo 資料夾按右鍵 → **Open in Terminal**（或 Git Bash Here）
+   - 或手動輸入（把路徑換成你自己 clone 的位置）：
+     ```
+     cd <你的 repo 路徑>
+     ```
+2. 執行分析：
 
 **只分析 RTOS：**
 ```
@@ -309,7 +310,3 @@ TaskSampling 錄製時 → TaskInference 已在處理上一批
 ```
 對於連續使用場景，RTOS 的吞吐量（每秒可處理幾次手勢）明顯更高。
 但對於單次 E2E，RTOS 版主要的優勢在於 TaskInference 不佔用 TaskSampling 的時間。
-
----
-
-*本手冊由 Claude Code 自動產生，如有疑問請詢問助教。*
