@@ -55,15 +55,30 @@ def parse_result_lines(text):
 
 
 def parse_smooth_lines(text):
-    """解析 [SMOOTH] 行，回傳 list of dict"""
-    pattern = r'\[SMOOTH\]\s+window=(\d+)\s+mean=([\d.]+)\s+std=([\d.]+)\s+max_dev=([\d.]+)'
+    """解析 [SMOOTH] 行，並配對同 trial 的 [RESULT] E2E 資料。
+    smoothing 版每個 trial 輸出順序：[SMOOTH] 緊接著 [RESULT]，
+    利用位置比對找到對應的 [RESULT]，把 e2e_us 一起存入。
+    """
+    smooth_pat = r'\[SMOOTH\]\s+window=(\d+)\s+mean=([\d.]+)\s+std=([\d.]+)\s+max_dev=([\d.]+)'
+    result_pat = r'\[RESULT\]\s+trial=(\d+)\s+first=(\d+)\s+last=(\d+)\s+pred=(\d+)'
+
+    smooths = [(m.start(), m) for m in re.finditer(smooth_pat, text)]
+    results = [(m.start(), m) for m in re.finditer(result_pat, text)]
+
     rows = []
-    for m in re.finditer(pattern, text):
+    for spos, sm in smooths:
+        # 找這個 [SMOOTH] 之後第一個 [RESULT]（同 trial）
+        e2e_us = None
+        for rpos, rm in results:
+            if rpos > spos:
+                e2e_us = int(rm.group(4)) - int(rm.group(2))  # pred - first
+                break
         rows.append({
-            'window':   int(m.group(1)),
-            'mean_us':  float(m.group(2)),
-            'std_us':   float(m.group(3)),
-            'max_dev':  float(m.group(4)),
+            'window':   int(sm.group(1)),
+            'mean_us':  float(sm.group(2)),
+            'std_us':   float(sm.group(3)),
+            'max_dev':  float(sm.group(4)),
+            'e2e_us':   e2e_us,   # 可能為 None（若 log 不完整）
         })
     return rows
 
@@ -158,19 +173,25 @@ def report_smooth(label, smooth_rows):
         by_window[r['window']].append(r)
 
     print(f"\n  {label} — [SMOOTH] 解析結果")
-    print(f"  {'Window':>8} {'mean_us':>10} {'std_us σ':>10} {'max_dev':>10} {'筆數':>6}")
-    print(f"  {'-'*50}")
+    print(f"  {'Window':>8} {'mean_us':>10} {'std σ (us)':>12} {'max_dev':>10} {'E2E mean (us)':>16} {'筆數':>6}")
+    print(f"  {'-'*68}")
 
     for w in sorted(by_window.keys()):
-        rows = by_window[w]
+        rows    = by_window[w]
         stds    = [r['std_us'] for r in rows]
         means   = [r['mean_us'] for r in rows]
         maxdevs = [r['max_dev'] for r in rows]
+        e2es    = [r['e2e_us'] for r in rows if r['e2e_us'] is not None]
+        e2e_str = f"{sum(e2es)/len(e2es):.0f}" if e2es else "[___]"
         print(f"  {w:>8} "
               f"{sum(means)/len(means):>10.1f} "
-              f"{sum(stds)/len(stds):>10.1f} "
+              f"{sum(stds)/len(stds):>12.1f} "
               f"{sum(maxdevs)/len(maxdevs):>10.1f} "
+              f"{e2e_str:>16} "
               f"{len(rows):>6}")
+
+    print(f"\n  ★ Accuracy 需手動填入：數一下各 window 辨識正確的次數 / 總次數")
+    print(f"    （看 Serial Monitor 裡 # PREDICTION,xxx 是否與你做的手勢相符）")
 
     return by_window
 
@@ -245,8 +266,8 @@ def markdown_smooth_table(by_window):
         "",
         "## Moving Average Filter 對照表",
         "",
-        "| Window Size | Accuracy（手動標注）| Stability σ (µs) | Latency E2E (µs) |",
-        "|-------------|--------------------|-----------------:|------------------:|",
+        "| Window Size | Accuracy（手動標注）| Stability σ (µs) | Latency E2E mean (µs) |",
+        "|-------------|:------------------:|-----------------:|----------------------:|",
     ]
 
     for w in [1, 3, 5]:
@@ -254,15 +275,20 @@ def markdown_smooth_table(by_window):
             rows  = by_window[w]
             stds  = [r['std_us'] for r in rows]
             sigma = f"{sum(stds)/len(stds):.1f}"
+            e2es  = [r['e2e_us'] for r in rows if r['e2e_us'] is not None]
+            e2e   = f"{sum(e2es)/len(e2es):.0f}" if e2es else "[___]"
         else:
             sigma = "[___]"
-        lines.append(f"| {w:<11} | [___]              | {sigma:>16} | [___]             |")
+            e2e   = "[___]"
+        lines.append(f"| {w:<11} | 請填入            | {sigma:>16} | {e2e:>21} |")
 
     lines += [
         "",
-        "> **Accuracy**：需手動標注各筆試驗的正確/錯誤，填入後計算正確率。",
-        "> **Stability σ**：取樣間隔標準差（單位 µs），越小代表取樣越穩定。",
-        "> **Latency E2E**：需執行 latency 量測試驗後填入。",
+        "> **Accuracy 填寫方式**：",
+        "> 數 Serial Monitor 裡 `# PREDICTION,xxx` 與你實際做的手勢相符的次數，",
+        "> 除以總次數（不含 static），填入格式如 `8/10 = 80%`。",
+        "> **Stability σ**：取樣間隔標準差（µs），由 `[SMOOTH]` 行自動計算。",
+        "> **Latency E2E**：`pred - first`（µs），由 `[RESULT]` 行自動計算。",
         "",
     ]
     return "\n".join(lines)
