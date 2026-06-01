@@ -35,7 +35,6 @@ static const uint8_t MPU_ADDR = 0x68;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-#define LED_PIN       6
 #define BTN_PIN       12
 
 #define DEBOUNCE_MS   30
@@ -126,7 +125,11 @@ bool readImu6_raw(int16_t *ax, int16_t *ay, int16_t *az,
                   int16_t *gx, int16_t *gy, int16_t *gz);
 void handleButton();
 void recordOneSample();
-void runInference(int static_frame_count);  // [STATIC FILTER] 接收即時累積的靜止幀數
+// === 新增：latency timing — runInference 接收三個時間戳 ===
+void runInference(int static_frame_count,
+                  unsigned long t_first_sample_us,
+                  unsigned long t_last_sample_us);
+// ============================================================
 
 // [STATIC FILTER] 新增函式宣告
 bool isStatic(int16_t ax_raw, int16_t ay_raw, int16_t az_raw,
@@ -317,10 +320,8 @@ void setup() {
   Serial.begin(115200);
   while (!Serial);
 
-  pinMode(LED_PIN, OUTPUT);
   pinMode(BTN_PIN, INPUT_PULLUP);
   MPU6050_wakeup();
-  analogWrite(LED_PIN, 0);
 
   Serial.println("Dataset collector ready.");
   Serial.println("Push btn to start recording.");
@@ -382,11 +383,15 @@ void recordOneSample() {
   int static_frame_count = 0;  // 本次錄製靜止幀計數（區域變數，不佔全域 SRAM）
 
   Serial.println("# GET_READY");
-  digitalWrite(LED_PIN, HIGH);
   delay(1000);
 
   Serial.println("# START");
   Serial.println("sample_id,timestep,t_us,ax,ay,az,gx,gy,gz");
+
+  // === 新增：latency timing ===
+  unsigned long t_first_sample_us = 0;
+  unsigned long t_last_sample_us  = 0;
+  // ===========================
 
   unsigned long nextSampleUs = micros();
 
@@ -396,6 +401,10 @@ void recordOneSample() {
     }
 
     unsigned long tUs = micros();
+    // === 新增：latency timing — 第一筆與最後一筆取樣時間戳 ===
+    if (i == 0)              t_first_sample_us = tUs;
+    if (i == NUM_SAMPLES-1)  t_last_sample_us  = tUs;
+    // =========================================================
 
     // TODO 2.2: Declare six int16_t variables: ax, ay, az, gx, gy, gz.
     //           (The call to readImu6_raw() and error handling below depend on
@@ -408,7 +417,6 @@ void recordOneSample() {
     if (!ok) {
       Serial.print("# ERROR at timestep ");
       Serial.println(i);
-      digitalWrite(LED_PIN, LOW);
       isRecording = false;
       return;
     }
@@ -448,12 +456,12 @@ void recordOneSample() {
   // [SRAM3] 錄製結束計時標記
   Serial.println(micros());
 
-  // 傳入靜止幀計數，runInference() 內部計算比例並決定是否跳過 CNN
-  runInference(static_frame_count);
+  // === 新增：latency timing — 傳入三個時間戳 ===
+  runInference(static_frame_count, t_first_sample_us, t_last_sample_us);
+  // ================================================
 
   // [SRAM3] # END 移至 runInference() 之後
   Serial.println("# END");
-  digitalWrite(LED_PIN, LOW);
   sampleId++;
   isRecording = false;
 }
@@ -462,8 +470,11 @@ void recordOneSample() {
 // ============================================================
 // runInference()
 // [STATIC FILTER] 接收 static_frame_count，不再需要掃描 raw_samples
+// === 新增：latency timing — 接收取樣時間戳，輸出 [RESULT] 格式 ===
 // ============================================================
-void runInference(int static_frame_count) {
+void runInference(int static_frame_count,
+                  unsigned long t_first_sample_us,
+                  unsigned long t_last_sample_us) {
   // [STATIC FILTER] -------------------------------------------------------
   // 計算靜止幀比例，決定是否跳過 CNN
   //
@@ -476,10 +487,17 @@ void runInference(int static_frame_count) {
 
   // [STATIC FILTER] 靜止判斷：超過閾值比例直接輸出，不進 CNN
   if (static_ratio >= STATIC_RATIO_THRESH) {
+    // === 新增：latency timing — static 分支也記錄推論完成時間 ===
+    unsigned long t_inference_done_us = micros();
     Serial.println("# INFERENCE_RESULT: static");
     Serial.print("# static_ratio: ");
     Serial.println(static_ratio);
-    return;  // 跳過 CNN inference，節省計算資源
+    Serial.print("[RESULT] trial=");   Serial.print(sampleId);
+    Serial.print(" first=");           Serial.print(t_first_sample_us);
+    Serial.print(" last=");            Serial.print(t_last_sample_us);
+    Serial.print(" pred=");            Serial.println(t_inference_done_us);
+    // ===========================================================
+    return;
   }
 
   // -----------------------------------------------------------------------
@@ -567,6 +585,10 @@ void runInference(int static_frame_count) {
     if (logits[i] > logits[label]) label = i;
   }
 
+  // === 新增：latency timing — 推論完成時間戳（argmax 之後）===
+  unsigned long t_inference_done_us = micros();
+  // ===========================================================
+
   // 輸出格式與 SRAM3 原始碼一致
   Serial.print("# INFERENCE_LATENCY_US,");
   Serial.println(latencyUs);
@@ -574,4 +596,17 @@ void runInference(int static_frame_count) {
   Serial.println(LABEL_NAMES[label]);
   Serial.print("# static_ratio: ");
   Serial.println(static_ratio);
+
+  // === 新增：latency timing — [RESULT] 機器可解析格式 ===
+  // 格式：[RESULT] trial=N first=T1 last=T2 pred=T3
+  //   trial : 本次錄製序號（sampleId）
+  //   first : 第一筆取樣的 micros() 時間戳
+  //   last  : 最後一筆取樣的 micros() 時間戳
+  //   pred  : CNN 推論完成後的 micros() 時間戳
+  // analyze_log.py 會解析此行計算 end-to-end latency
+  Serial.print("[RESULT] trial=");   Serial.print(sampleId);
+  Serial.print(" first=");           Serial.print(t_first_sample_us);
+  Serial.print(" last=");            Serial.print(t_last_sample_us);
+  Serial.print(" pred=");            Serial.println(t_inference_done_us);
+  // ========================================================
 }

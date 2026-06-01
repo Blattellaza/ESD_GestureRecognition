@@ -1,0 +1,24 @@
+# IDE
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Memory / personal assistant data
+.claude/
+
+# Generated analysis output
+analysis_report.md
+
+# Experiment log files (raw serial captures, not tracked)
+rtos_log.txt
+prefilter_log.txt
+window1_log.txt
+window3_log.txt
+window5_log.txt
+
+# Course materials (PDFs stay local)
+*.pdf

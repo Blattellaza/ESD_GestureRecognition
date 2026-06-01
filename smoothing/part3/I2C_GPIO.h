@@ -7,7 +7,7 @@
 // Tool API
 // ----------------------------------------------------------------------------
 void SDA_Low();
-void SDA_Release(); 
+void SDA_Release();
 
 void SCL_Low();
 void SCL_Release();

@@ -25,7 +25,7 @@
 //   TaskSampling  (Priority 3) → 等待 button semaphore → 錄製 150 筆
 //                                → 送 InferenceMsg_t* 給 xQueueInference
 //   TaskInference (Priority 2) → 收到樣本 → 跑 CNN → 送結果給 xQueueOutput
-//   TaskOutput    (Priority 1) → 收到結果 → Serial 輸出 + LED 控制
+//   TaskOutput    (Priority 1) → 收到結果 → Serial 輸出
 //
 // [PERF] Pipeline 效能量測（全部使用 micros()，精度 1 us）：
 //
@@ -56,10 +56,10 @@
 #include "I2C_GPIO.h"
 #include "nn_ops.h"
 #include <Arduino.h>
-#include <FreeRTOS.h>
-#include <task.h>
-#include <queue.h>
-#include <semphr.h>
+#include "src/FreeRTOS.h"
+#include "src/task.h"
+#include "src/queue.h"
+#include "src/semphr.h"
 #include <stdlib.h>   // malloc / free
 #include <string.h>   // memcpy
 
@@ -76,7 +76,6 @@ static const uint8_t MPU_ADDR = 0x68;
 #define PWR_MGMT_1    0x6B
 #define ACCEL_XOUT_H  0x3B
 
-#define LED_PIN       6
 #define BTN_PIN       12
 
 #define DEBOUNCE_MS   30
@@ -162,6 +161,8 @@ typedef struct {
   int           static_frame_count;                    // 本次錄製靜止幀數
   uint32_t      sample_id;                             // 樣本編號（供 log 用）
   unsigned long t_record_start_us;                     // [PERF] 錄製開始時間（micros）
+  // === 新增：latency timing ===
+  unsigned long t_last_sample_us;                      // [PERF] 最後一筆取樣完成後的時間戳（micros）
 } InferenceMsg_t;
 
 // [RTOS] Inference → Output
@@ -171,6 +172,8 @@ typedef struct {
   float         static_ratio;          // 靜止幀比例（供 log 用）
   uint32_t      sample_id;             // 樣本編號（供 log 用）
   unsigned long t_record_start_us;     // [PERF] 從 Sampling 帶過來（micros）
+  // === 新增：latency timing ===
+  unsigned long t_last_sample_us;      // [PERF] 最後一筆取樣完成後的時間戳（micros）
   unsigned long t_inference_done_us;   // [PERF] Inference 完成時間（micros）
 } OutputMsg_t;
 
@@ -421,7 +424,6 @@ void TaskSampling(void *pvParameters) {
     pMsg->sample_id          = sampleId;
 
     Serial.println("# GET_READY");
-    digitalWrite(LED_PIN, HIGH);
     vTaskDelay(pdMS_TO_TICKS(1000));
 
     Serial.println("# START");
@@ -460,7 +462,6 @@ void TaskSampling(void *pvParameters) {
       if (!ok) {
         Serial.print("# ERROR at timestep ");
         Serial.println(i);
-        digitalWrite(LED_PIN, LOW);
         record_ok = false;
         break;
       }
@@ -495,7 +496,8 @@ void TaskSampling(void *pvParameters) {
       continue;
     }
 
-    Serial.println(micros());
+    // === 新增：latency timing — 最後一筆取樣完成後立即記錄 ===
+    pMsg->t_last_sample_us = micros();
 
     // -------------------------------------------------------
     // [PERF] 計算 sampling period 統計數據
@@ -513,20 +515,20 @@ void TaskSampling(void *pvParameters) {
     //     TaskSampling Priority=3 最高，被搶佔機率極低
     // -------------------------------------------------------
     {
-      float sum_p  = 0.0f;
-      float sum_p2 = 0.0f;
-      int   n      = NUM_SAMPLES - 1;  // 149 個間隔
+      int   n     = NUM_SAMPLES - 1;  // 149 個間隔
+      float sum_p = 0.0f;
 
       for (int i = 1; i < NUM_SAMPLES; i++) {
-        float period = (float)(ts[i] - ts[i - 1]);
-        sum_p  += period;
-        sum_p2 += period * period;
+        sum_p += (float)(ts[i] - ts[i - 1]);
       }
 
-      float mean_p = sum_p / (float)n;
-      // 變異數：E[X²] - (E[X])²
-      float var_p  = (sum_p2 / (float)n) - (mean_p * mean_p);
-      float std_p  = sqrtf(var_p < 0.0f ? 0.0f : var_p);
+      float mean_p  = sum_p / (float)n;
+      float var_sum = 0.0f;
+      for (int i = 1; i < NUM_SAMPLES; i++) {
+        float dev = (float)(ts[i] - ts[i - 1]) - mean_p;
+        var_sum += dev * dev;
+      }
+      float std_p = sqrtf(var_sum / (float)n);
 
       float max_dev = 0.0f;
       for (int i = 1; i < NUM_SAMPLES; i++) {
@@ -590,9 +592,12 @@ void TaskInference(void *pvParameters) {
     outMsg.sample_id         = pMsg->sample_id;
     outMsg.static_ratio      = static_ratio;
     outMsg.t_record_start_us = pMsg->t_record_start_us;  // [PERF] 帶過來
+    // === 新增：latency timing ===
+    outMsg.t_last_sample_us  = pMsg->t_last_sample_us;   // [PERF] 帶過來
 
     if (static_ratio >= STATIC_RATIO_THRESH) {
       outMsg.result_idx          = -1;
+      // === 新增：latency timing — static 分支也記錄推論完成時間 ===
       outMsg.t_inference_done_us = micros();  // [PERF]
       RTOS_FREE(pMsg);
       xQueueSend(xQueueOutput, &outMsg, portMAX_DELAY);
@@ -782,17 +787,24 @@ void TaskOutput(void *pvParameters) {
     Serial.print(pipeline_overhead);
     Serial.println(" us  (end_to_end - 1500000 us recording)");
 
-    Serial.println("# END");
-    digitalWrite(LED_PIN, LOW);
+    // === 新增：latency timing — [RESULT] 機器可解析格式 ===
+    // 格式：[RESULT] trial=N first=T1 last=T2 pred=T3
+    //   trial : 本次錄製序號（sampleId）
+    //   first : 第一筆取樣前的時間戳（TaskSampling 開始錄製）
+    //   last  : 最後一筆取樣完成後的時間戳
+    //   pred  : TaskInference 推論完成後的時間戳
+    // analyze_log.py 會解析此行計算 end-to-end latency
+    Serial.print("[RESULT] trial=");
+    Serial.print(msg.sample_id);
+    Serial.print(" first=");
+    Serial.print(msg.t_record_start_us);
+    Serial.print(" last=");
+    Serial.print(msg.t_last_sample_us);
+    Serial.print(" pred=");
+    Serial.println(msg.t_inference_done_us);
+    // ========================================================
 
-    // [LED] 閃爍次數 = class index + 1（static 不閃）
-    int blinks = (msg.result_idx == -1) ? 0 : (msg.result_idx + 1);
-    for (int b = 0; b < blinks; b++) {
-      digitalWrite(LED_PIN, HIGH);
-      vTaskDelay(pdMS_TO_TICKS(150));
-      digitalWrite(LED_PIN, LOW);
-      vTaskDelay(pdMS_TO_TICKS(150));
-    }
+    Serial.println("# END");
   }
 }
 
@@ -806,8 +818,6 @@ void setup() {
   Serial.println("Dataset collector ready.");
   Serial.println("Push btn to start recording.");
 
-  pinMode(LED_PIN, OUTPUT);
-  analogWrite(LED_PIN, 0);
   pinMode(BTN_PIN, INPUT_PULLUP);
 
   MPU6050_wakeup();
@@ -820,7 +830,7 @@ void setup() {
 
   // TaskSampling  stack=1024 words：容納 ts[150](600B) + readImu6_raw buf[14] + isStatic float
   // TaskInference stack=512  words：大陣列全為全域，stack 只需 gap_tmp[32] 與迴圈變數
-  // TaskOutput    stack=256  words：只做 Serial.print + LED
+  // TaskOutput    stack=256  words：只做 Serial.print
   xTaskCreate(TaskSampling,  "Sampling",  1024, NULL, 3, &hTaskSampling);
   xTaskCreate(TaskInference, "Inference", 512,  NULL, 2, &hTaskInference);
   xTaskCreate(TaskOutput,    "Output",    256,  NULL, 1, &hTaskOutput);
