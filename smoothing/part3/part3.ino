@@ -48,7 +48,7 @@ static const uint8_t MPU_ADDR = 0x68;
 // 修改此值即可切換濾波強度：1（無濾波）/ 3（推薦）/ 5（強濾波）
 // 注意：修改後須重新編譯燒錄
 // ============================================================
-#define WINDOW_SIZE 3
+#define WINDOW_SIZE 5
 
 // MAFilter: circular buffer 實作的移動平均濾波器
 // 用於 ax / ay / az 三軸，在進入 NN pipeline 前降噪
@@ -394,19 +394,22 @@ void recordOneSample() {
   // 計算 sampling period mean / std / max_dev，評估取樣穩定性
   // 不同 WINDOW_SIZE 下的 std 可量化濾波對穩定性的影響
   {
-    float sum_p  = 0.0f;
-    float sum_p2 = 0.0f;
     int   n      = NUM_SAMPLES - 1;  // 149 個間隔
+    float sum_p  = 0.0f;
 
     for (int i = 1; i < NUM_SAMPLES; i++) {
-      float period = (float)(ts[i] - ts[i - 1]);
-      sum_p  += period;
-      sum_p2 += period * period;
+      sum_p += (float)(ts[i] - ts[i - 1]);
     }
-
     float mean_p = sum_p / (float)n;
-    float var_p  = (sum_p2 / (float)n) - (mean_p * mean_p);
-    float std_p  = sqrtf(var_p < 0.0f ? 0.0f : var_p);
+
+    // 兩步計算法：先算 mean，再算偏差平方和
+    // 避免 E[X²]-(E[X])² 的大數相減精度損失（catastrophic cancellation）
+    float var_sum = 0.0f;
+    for (int i = 1; i < NUM_SAMPLES; i++) {
+      float dev = (float)(ts[i] - ts[i - 1]) - mean_p;
+      var_sum += dev * dev;
+    }
+    float std_p = sqrtf(var_sum / (float)n);
 
     float max_dev = 0.0f;
     for (int i = 1; i < NUM_SAMPLES; i++) {

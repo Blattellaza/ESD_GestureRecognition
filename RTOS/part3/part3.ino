@@ -499,8 +499,6 @@ void TaskSampling(void *pvParameters) {
     // === 新增：latency timing — 最後一筆取樣完成後立即記錄 ===
     pMsg->t_last_sample_us = micros();
 
-    Serial.println(micros());
-
     // -------------------------------------------------------
     // [PERF] 計算 sampling period 統計數據
     //
@@ -517,20 +515,20 @@ void TaskSampling(void *pvParameters) {
     //     TaskSampling Priority=3 最高，被搶佔機率極低
     // -------------------------------------------------------
     {
-      float sum_p  = 0.0f;
-      float sum_p2 = 0.0f;
-      int   n      = NUM_SAMPLES - 1;  // 149 個間隔
+      int   n     = NUM_SAMPLES - 1;  // 149 個間隔
+      float sum_p = 0.0f;
 
       for (int i = 1; i < NUM_SAMPLES; i++) {
-        float period = (float)(ts[i] - ts[i - 1]);
-        sum_p  += period;
-        sum_p2 += period * period;
+        sum_p += (float)(ts[i] - ts[i - 1]);
       }
 
-      float mean_p = sum_p / (float)n;
-      // 變異數：E[X²] - (E[X])²
-      float var_p  = (sum_p2 / (float)n) - (mean_p * mean_p);
-      float std_p  = sqrtf(var_p < 0.0f ? 0.0f : var_p);
+      float mean_p  = sum_p / (float)n;
+      float var_sum = 0.0f;
+      for (int i = 1; i < NUM_SAMPLES; i++) {
+        float dev = (float)(ts[i] - ts[i - 1]) - mean_p;
+        var_sum += dev * dev;
+      }
+      float std_p = sqrtf(var_sum / (float)n);
 
       float max_dev = 0.0f;
       for (int i = 1; i < NUM_SAMPLES; i++) {
