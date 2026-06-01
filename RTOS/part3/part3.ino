@@ -25,7 +25,7 @@
 //   TaskSampling  (Priority 3) → 等待 button semaphore → 錄製 150 筆
 //                                → 送 InferenceMsg_t* 給 xQueueInference
 //   TaskInference (Priority 2) → 收到樣本 → 跑 CNN → 送結果給 xQueueOutput
-//   TaskOutput    (Priority 1) → 收到結果 → Serial 輸出 + LED 控制
+//   TaskOutput    (Priority 1) → 收到結果 → Serial 輸出
 //
 // [PERF] Pipeline 效能量測（全部使用 micros()，精度 1 us）：
 //
@@ -830,7 +830,7 @@ void setup() {
 
   // TaskSampling  stack=1024 words：容納 ts[150](600B) + readImu6_raw buf[14] + isStatic float
   // TaskInference stack=512  words：大陣列全為全域，stack 只需 gap_tmp[32] 與迴圈變數
-  // TaskOutput    stack=256  words：只做 Serial.print + LED
+  // TaskOutput    stack=256  words：只做 Serial.print
   xTaskCreate(TaskSampling,  "Sampling",  1024, NULL, 3, &hTaskSampling);
   xTaskCreate(TaskInference, "Inference", 512,  NULL, 2, &hTaskInference);
   xTaskCreate(TaskOutput,    "Output",    256,  NULL, 1, &hTaskOutput);
